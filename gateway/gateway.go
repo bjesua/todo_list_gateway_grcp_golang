@@ -1,19 +1,21 @@
 package main
 
 import (
-	"io/ioutil"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strings"
 )
 
 func HomeHandler(w http.ResponseWriter, r *http.Request) {
-	w.Write([]byte("Gateway service is running"))
+	w.Write([]byte("Gateway Funcionando"))
 }
 
 func ProxyToAuthService(w http.ResponseWriter, r *http.Request) {
 	// Eliminar el prefijo "/auth" del RequestURI para redirigir correctamente
 	uri := strings.TrimPrefix(r.RequestURI, "/auth")
+	// fmt.Println("solicitud: ", r.RequestURI, " Sufijo: ", uri)
 	url := "http://auth:8001" + uri
 	log.Println("Redirecting to:", url)
 
@@ -30,7 +32,8 @@ func ProxyToAuthService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, _ := ioutil.ReadAll(resp.Body)
+	body, _ := io.ReadAll(resp.Body)
+	fmt.Println(body)
 	w.Write(body)
 }
 
@@ -53,7 +56,7 @@ func ProxyToTodoService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, _ := ioutil.ReadAll(resp.Body)
+	body, _ := io.ReadAll(resp.Body)
 	w.Write(body)
 }
 

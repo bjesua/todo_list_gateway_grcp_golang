@@ -12,8 +12,6 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 )
 
-var jwtKey = []byte("my_secret_key")
-
 type Todo struct {
 	ID     int    `json:"id"`
 	User   string `json:"user"`
