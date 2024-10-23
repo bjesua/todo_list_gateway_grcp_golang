@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package gateway;
+
+option go_package = "/gen;gateway";
+
+service GatewayService {
+    rpc ProxyAuthRequest (AuthRequest) returns (AuthResponse);
+    rpc ProxyTodoRequest (TodoRequest) returns (TodoResponse);
+}
+
+message AuthRequest {
+    string username = 1;
+    string password = 2;
+}
+
+message AuthResponse {
+    string token = 1;
+}
+
+message TodoRequest {
+    string task = 1;
+    string status = 2;
+}
+
+message TodoResponse {
+    string message = 1;
+}

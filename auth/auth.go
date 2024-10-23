@@ -1,29 +1,40 @@
 package main
 
 import (
+	"context"
 	"database/sql"
-	"encoding/json"
 	"log"
-	"net/http"
+	"net"
 	"os"
 	"time"
 
-	"github.com/dgrijalva/jwt-go"
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/golang-jwt/jwt/v4"
 	"golang.org/x/crypto/bcrypt"
+
+	pb "auth/auth/gen"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/reflection"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 var jwtKey = []byte("my_secret_key")
 
-type User struct {
-	ID       int    `json:"id"`
-	Username string `json:"username"`
-	Password string `json:"password"`
+type authServiceServer struct {
+	pb.UnimplementedAuthServiceServer
 }
 
 type Claims struct {
 	Username string `json:"username"`
 	jwt.StandardClaims
+}
+
+// Nueva estructura para manejar la contraseña
+type UserWithPassword struct {
+	ID       int32
+	Username string
+	Password string
 }
 
 func dbConn() *sql.DB {
@@ -32,7 +43,6 @@ func dbConn() *sql.DB {
 	dbPass := os.Getenv("DB_PASS")
 	dbName := os.Getenv("DB_NAME")
 
-	// Verificación para asegurarse de que las variables de entorno no estén vacías
 	if dbUser == "" || dbPass == "" || dbName == "" {
 		log.Fatal("Faltan variables de entorno para la conexión a la base de datos")
 	}
@@ -60,76 +70,48 @@ func dbConn() *sql.DB {
 	return db
 }
 
-func HomeHandler(w http.ResponseWriter, r *http.Request) {
-	w.Write([]byte("Auth service is running"))
-}
-
-func Register(w http.ResponseWriter, r *http.Request) {
-	var user User
-	err := json.NewDecoder(r.Body).Decode(&user)
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-
-	// Hash del password
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-
+// Implementación del método Register
+func (s *authServiceServer) Register(ctx context.Context, req *pb.RegisterRequest) (*pb.RegisterResponse, error) {
 	db := dbConn()
 	defer db.Close()
 
-	// Insertar el usuario en la base de datos
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, err
+	}
+
 	insert, err := db.Prepare("INSERT INTO users(username, password) VALUES(?, ?)")
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		log.Println("Error preparando la consulta:", err)
-		return
+		return nil, err
 	}
-	_, err = insert.Exec(user.Username, string(hashedPassword))
+	_, err = insert.Exec(req.Username, string(hashedPassword))
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		log.Println("Error insertando el usuario:", err)
-		return
+		return nil, err
 	}
 
-	w.WriteHeader(http.StatusCreated)
+	return &pb.RegisterResponse{Message: "Usuario registrado exitosamente"}, nil
 }
 
-func Login(w http.ResponseWriter, r *http.Request) {
-	var user User
-	err := json.NewDecoder(r.Body).Decode(&user)
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-
+func (s *authServiceServer) Login(ctx context.Context, req *pb.LoginRequest) (*pb.LoginResponse, error) {
 	db := dbConn()
 	defer db.Close()
 
-	// Obtener el usuario de la base de datos
-	var storedUser User
-	err = db.QueryRow("SELECT id, username, password FROM users WHERE username=?", user.Username).Scan(&storedUser.ID, &storedUser.Username, &storedUser.Password)
+	var storedUser UserWithPassword
+	err := db.QueryRow("SELECT id, username, password FROM users WHERE username=?", req.Username).Scan(&storedUser.ID, &storedUser.Username, &storedUser.Password)
 	if err != nil {
-		w.WriteHeader(http.StatusUnauthorized)
-		log.Println("Usuario no encontrado o error:", err)
-		return
+		return nil, err
 	}
 
 	// Comparar la contraseña
-	err = bcrypt.CompareHashAndPassword([]byte(storedUser.Password), []byte(user.Password))
+	err = bcrypt.CompareHashAndPassword([]byte(storedUser.Password), []byte(req.Password))
 	if err != nil {
-		w.WriteHeader(http.StatusUnauthorized)
-		return
+		return nil, err
 	}
 
 	// Generar el token JWT
 	expirationTime := time.Now().Add(5 * time.Minute)
 	claims := &Claims{
-		Username: user.Username,
+		Username: req.Username,
 		StandardClaims: jwt.StandardClaims{
 			ExpiresAt: expirationTime.Unix(),
 		},
@@ -138,48 +120,52 @@ func Login(w http.ResponseWriter, r *http.Request) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	tokenString, err := token.SignedString(jwtKey)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		return
+		return nil, err
 	}
 
-	// Retornar el token JWT en la respuesta JSON
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
-		"token": tokenString,
-	})
+	return &pb.LoginResponse{Token: tokenString}, nil
 }
 
-func ListUsers(w http.ResponseWriter, r *http.Request) {
+// Implementación del método ListUsers
+func (s *authServiceServer) ListUsers(ctx context.Context, req *emptypb.Empty) (*pb.ListUsersResponse, error) {
 	db := dbConn()
 	defer db.Close()
 
 	rows, err := db.Query("SELECT id, username FROM users")
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
 	defer rows.Close()
 
-	var users []User
+	var users []*pb.User
 	for rows.Next() {
-		var user User
-		err = rows.Scan(&user.ID, &user.Username)
+		var user pb.User
+		err = rows.Scan(&user.Id, &user.Username)
 		if err != nil {
-			log.Fatal(err)
+			return nil, err
 		}
-		users = append(users, user)
+		users = append(users, &user)
 	}
 
-	// Retorna la lista de usuarios en formato JSON
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(users)
+	return &pb.ListUsersResponse{Users: users}, nil
 }
 
 func main() {
-	http.HandleFunc("/", HomeHandler)
-	http.HandleFunc("/register", Register)
-	http.HandleFunc("/login", Login)
-	http.HandleFunc("/users", ListUsers) // Nueva ruta para listar los usuarios
+	lis, err := net.Listen("tcp", ":50051")
+	if err != nil {
+		log.Fatalf("failed to listen: %v", err)
+	}
 
-	log.Println("Auth service running on port 8001")
-	log.Fatal(http.ListenAndServe(":8001", nil))
+	grpcServer := grpc.NewServer()
+
+	// Registrar el servicio AuthServiceServer en el servidor gRPC
+	pb.RegisterAuthServiceServer(grpcServer, &authServiceServer{})
+
+	// Habilitar la reflexión para permitir que herramientas como grpcurl descubran los servicios
+	reflection.Register(grpcServer)
+
+	log.Println("gRPC server is running on port 50051...")
+	if err := grpcServer.Serve(lis); err != nil {
+		log.Fatalf("failed to serve: %v", err)
+	}
 }

@@ -1,11 +1,12 @@
+
 services:
   db:
     image: mysql:8.0
     environment:
-      MYSQL_ROOT_PASSWORD: rootpassword      
-      MYSQL_DATABASE: mydatabase             
-      MYSQL_USER: appuser                    
-      MYSQL_PASSWORD: appuserpassword        
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: mydatabase
+      MYSQL_USER: appuser
+      MYSQL_PASSWORD: appuserpassword
     ports:
       - "3306:3306"
     volumes:
@@ -17,40 +18,16 @@ services:
   auth:
     build: ./auth
     ports:
-      - "8001:8001"
+      - "50051:50051"  
     environment:
       - DB_USER=appuser
       - DB_PASS=appuserpassword
       - DB_NAME=mydatabase
-      - DB_HOST=db
     depends_on:
       - db
     networks:
       - app-network
 
-  todo:
-    build: ./todo
-    ports:
-      - "8002:8002"
-    environment:
-      - DB_USER=appuser
-      - DB_PASS=appuserpassword
-      - DB_NAME=mydatabase
-      - DB_HOST=db
-    depends_on:
-      - db
-    networks:
-      - app-network
-
-  gateway:
-    build: ./gateway
-    ports:
-      - "8000:8000"
-    depends_on:
-      - auth
-      - todo
-    networks:
-      - app-network
 
 volumes:
   db_data:
@@ -58,3 +35,4 @@ volumes:
 networks:
   app-network:
     driver: bridge
+
